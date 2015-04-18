@@ -41,10 +41,12 @@ module.exports = function (grunt) {
         frameworks: ['jasmine', 'commonjs'],
         files: [
           'test/unit/lib/jquery.js',
+          'vendor/*.js',
           'src/**/*.js',
           'test/unit/specs/**/*.js'
         ],
         preprocessors: {
+          'vendor/*.js': ['commonjs'],
           'src/**/*.js': ['commonjs'],
           'test/unit/specs/**/*.js': ['commonjs']
         },
@@ -61,6 +63,7 @@ module.exports = function (grunt) {
           browsers: ['PhantomJS'],
           reporters: ['progress', 'coverage'],
           preprocessors: {
+            'vendor/*.js': ['commonjs'],
             'src/**/*.js': ['commonjs', 'coverage'],
             'test/unit/specs/**/*.js': ['commonjs']
           },

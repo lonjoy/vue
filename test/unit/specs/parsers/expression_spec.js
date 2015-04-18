@@ -197,13 +197,6 @@ var testCases = [
     },
     expected: true,
     paths: []
-  },
-  {
-    // Date global
-    exp: 'Date.now() > new Date("2000-01-01")',
-    scope: {},
-    expected: true,
-    paths: []
   }
 ]
 
