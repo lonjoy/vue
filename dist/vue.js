@@ -871,11 +871,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {Boolean}
 	 */
 
-	var doc =
-	  typeof document !== 'undefined' &&
-	  document.documentElement
-
 	exports.inDoc = function (node) {
+	  var doc = document.documentElement
 	  var parent = node && node.parentNode
 	  return doc === node ||
 	    doc === parent ||
@@ -1093,13 +1090,13 @@ return /******/ (function(modules) { // webpackBootstrap
 	   * @param {String} msg
 	   */
 
-	  exports.warn = function (msg) {
+	  exports.warn = function (msg, e) {
 	    if (hasConsole && (!config.silent || config.debug)) {
 	      console.warn('[Vue warn]: ' + msg)
 	      /* istanbul ignore if */
 	      if (config.debug) {
 	        /* jshint debug: true */
-	        debugger
+	        console.warn((e || new Error('Warning Stack Trace')).stack)
 	      }
 	    }
 	  }
@@ -1726,7 +1723,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (config.warnExpressionErrors) {
 	      _.warn(
 	        'Error when evaluating expression "' +
-	        this.expression + '":\n   ' + e
+	        this.expression + '"', e
 	      )
 	    }
 	  }
@@ -1763,7 +1760,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (config.warnExpressionErrors) {
 	      _.warn(
 	        'Error when evaluating setter "' +
-	        this.expression + '":\n   ' + e
+	        this.expression + '"', e
 	      )
 	    }
 	  }
@@ -2925,7 +2922,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	        warnNonExistent(path)
 	      }
 	    } else {
-	      if (key in obj) {
+	      if (_.isArray(obj)) {
+	        obj.$set(key, val)
+	      } else if (key in obj) {
 	        obj[key] = val
 	      } else {
 	        obj.$add(key, val)
@@ -5554,17 +5553,44 @@ return /******/ (function(modules) { // webpackBootstrap
 	var addClass = _.addClass
 	var removeClass = _.removeClass
 
-	module.exports = function (value) {
-	  if (this.arg) {
-	    var method = value ? addClass : removeClass
-	    method(this.el, this.arg)
-	  } else {
+	module.exports = {
+	  
+	  update: function (value) {
+	    if (this.arg) {
+	      // single toggle
+	      var method = value ? addClass : removeClass
+	      method(this.el, this.arg)
+	    } else {
+	      this.cleanup()
+	      if (value && typeof value === 'string') {
+	        // raw CSSText
+	        addClass(this.el, value)
+	        this.lastVal = value
+	      } else if (_.isPlainObject(value)) {
+	        // object toggle
+	        for (var key in value) {
+	          if (value[key]) {
+	            addClass(this.el, key)
+	          } else {
+	            removeClass(this.el, key)
+	          }
+	        }
+	        this.prevKeys = Object.keys(value)
+	      }
+	    }
+	  },
+
+	  cleanup: function (value) {
 	    if (this.lastVal) {
 	      removeClass(this.el, this.lastVal)
 	    }
-	    if (value) {
-	      addClass(this.el, value)
-	      this.lastVal = value
+	    if (this.prevKeys) {
+	      var i = this.prevKeys.length
+	      while (i--) {
+	        if (!value || !value[this.prevKeys[i]]) {
+	          removeClass(this.el, this.prevKeys[i])
+	        }
+	      }
 	    }
 	  }
 	}
@@ -5781,7 +5807,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var animationEndEvent = _.animationEndEvent
 	var transDurationProp = _.transitionProp + 'Duration'
 	var animDurationProp = _.animationProp + 'Duration'
-	var doc = typeof document === 'undefined' ? null : document
 
 	var TYPE_TRANSITION = 1
 	var TYPE_ANIMATION = 2
@@ -5805,7 +5830,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  // async state
 	  this.pendingCssEvent =
 	  this.pendingCssCb =
-	  this.jsCancel =
+	  this.cancel =
 	  this.pendingJsCb =
 	  this.op =
 	  this.cb = null
@@ -5852,6 +5877,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  addClass(this.el, this.enterClass)
 	  op()
 	  this.callHookWithCb('enter')
+	  this.cancel = this.hooks && this.hooks.enterCancelled
 	  queue.push(this.enterNextTick)
 	}
 
@@ -5880,7 +5906,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	p.enterDone = function () {
-	  this.jsCancel = this.pendingJsCb = null
+	  this.cancel = this.pendingJsCb = null
 	  removeClass(this.el, this.enterClass)
 	  this.callHook('afterEnter')
 	  if (this.cb) this.cb()
@@ -5914,6 +5940,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  this.cb = cb
 	  addClass(this.el, this.leaveClass)
 	  this.callHookWithCb('leave')
+	  this.cancel = this.hooks && this.hooks.enterCancelled
 	  // only need to do leaveNextTick if there's no explicit
 	  // js callback
 	  if (!this.pendingJsCb) {
@@ -5942,6 +5969,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	 */
 
 	p.leaveDone = function () {
+	  this.cancel = this.pendingJsCb = null
 	  this.op()
 	  removeClass(this.el, this.leaveClass)
 	  this.callHook('afterLeave')
@@ -5970,9 +5998,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    removeClass(this.el, this.enterClass)
 	    removeClass(this.el, this.leaveClass)
 	  }
-	  if (this.jsCancel) {
-	    this.jsCancel.call(null)
-	    this.jsCancel = null
+	  if (this.cancel) {
+	    this.cancel.call(this.vm, this.el)
+	    this.cancel = null
 	  }
 	}
 
@@ -6005,7 +6033,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    if (hook.length > 1) {
 	      this.pendingJsCb = _.cancellable(this[type + 'Done'])
 	    }
-	    this.jsCancel = hook.call(this.vm, this.el, this.pendingJsCb)
+	    hook.call(this.vm, this.el, this.pendingJsCb)
 	  }
 	}
 
@@ -6024,7 +6052,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	  // pageVisibility API is supported in IE10+, same as
 	  // CSS transitions.
 	  /* istanbul ignore if */
-	  if (!transitionEndEvent || (doc && doc.hidden)) {
+	  if (!transitionEndEvent || document.hidden) {
 	    return
 	  }
 	  var type = this.typeCache[className]
@@ -6250,7 +6278,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	      var filter = _.resolveAsset(this.vm.$options, 'filters', filters[i].name)
 	      if (typeof filter === 'function' || filter.read) {
 	        this.hasRead = true
-	      } else if (filter.write) {
+	      }
+	      if (filter.write) {
 	        this.hasWrite = true
 	      }
 	    }
@@ -6703,9 +6732,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	  bind: function () {
 	    // uid as a cache identifier
 	    this.id = '__v_repeat_' + (++uid)
-	    // setup anchor node
-	    this.anchor = _.createAnchor('v-repeat')
-	    _.replace(this.el, this.anchor)
+	    // setup anchor nodes
+	    this.start = _.createAnchor('v-repeat-start')
+	    this.end = _.createAnchor('v-repeat')
+	    _.replace(this.el, this.end)
+	    _.before(this.start, this.end)
 	    // check if this is a block repeat
 	    this.template = this.el.tagName === 'TEMPLATE'
 	      ? templateParser.parse(this.el, true)
@@ -6719,6 +6750,8 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.idKey =
 	      this._checkParam('track-by') ||
 	      this._checkParam('trackby') // 0.11.0 compat
+	    // check for transition stagger
+	    this.stagger = +this._checkParam('stagger')
 	    this.cache = Object.create(null)
 	  },
 
@@ -6889,7 +6922,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	    this.vms = this.diff(data, this.vms)
 	    // update v-ref
 	    if (this.refID) {
-	      this.vm.$[this.refID] = this.vms
+	      this.vm.$[this.refID] = this.converted
+	        ? toRefObject(this.vms)
+	        : this.vms
 	    }
 	    if (this.elId) {
 	      this.vm.$$[this.elId] = this.vms.map(function (vm) {
@@ -6915,13 +6950,15 @@ return /******/ (function(modules) { // webpackBootstrap
 	   */
 
 	  diff: function (data, oldVms) {
+	    var activeElement = document.activeElement
 	    var idKey = this.idKey
 	    var converted = this.converted
-	    var anchor = this.anchor
+	    var start = this.start
+	    var end = this.end
 	    var alias = this.arg
 	    var init = !oldVms
 	    var vms = new Array(data.length)
-	    var obj, raw, vm, i, l
+	    var obj, raw, vm, i, l, primitive
 	    // First pass, go through the new Array and fill up
 	    // the new vms array. If a piece of data has a cached
 	    // instance for it, we reuse it. Otherwise build a new
@@ -6929,6 +6966,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    for (i = 0, l = data.length; i < l; i++) {
 	      obj = data[i]
 	      raw = converted ? obj.$value : obj
+	      primitive = !isObject(raw)
 	      vm = !init && this.getVm(raw, i, converted ? obj.$key : null)
 	      if (vm) { // reusable instance
 	        vm._reused = true
@@ -6936,7 +6974,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	        // update data for track-by or object repeat,
 	        // since in these two cases the data is replaced
 	        // rather than mutated.
-	        if (idKey || converted) {
+	        if (idKey || converted || primitive) {
 	          if (alias) {
 	            vm[alias] = raw
 	          } else if (_.isPlainObject(raw)) {
@@ -6947,16 +6985,12 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 	      } else { // new instance
 	        vm = this.build(obj, i, true)
-	        // the _new flag is used in the second pass for
-	        // vm cache retrival, but if this is the init phase
-	        // the flag can just be set to false directly.
-	        vm._new = !init
 	        vm._reused = false
 	      }
 	      vms[i] = vm
 	      // insert if this is first run
 	      if (init) {
-	        vm.$before(anchor)
+	        vm.$before(end)
 	      }
 	    }
 	    // if this is the first run, we're done.
@@ -6966,48 +7000,50 @@ return /******/ (function(modules) { // webpackBootstrap
 	    // Second pass, go through the old vm instances and
 	    // destroy those who are not reused (and remove them
 	    // from cache)
+	    var removalIndex = 0
 	    for (i = 0, l = oldVms.length; i < l; i++) {
 	      vm = oldVms[i]
 	      if (!vm._reused) {
 	        this.uncacheVm(vm)
-	        vm.$destroy(true)
+	        vm.$destroy(false, true)
+	        this.remove(vm, removalIndex++)
 	      }
 	    }
 	    // final pass, move/insert new instances into the
-	    // right place. We're going in reverse here because
-	    // insertBefore relies on the next sibling to be
-	    // resolved.
-	    var targetNext, currentNext
-	    i = vms.length
-	    while (i--) {
+	    // right place.
+	    var targetPrev, currentPrev
+	    var insertionIndex = 0
+	    for (i = 0, l = vms.length; i < l; i++) {
 	      vm = vms[i]
-	      // this is the vm that we should be in front of
-	      targetNext = vms[i + 1]
-	      if (!targetNext) {
-	        // This is the last item. If it's reused then
+	      // this is the vm that we should be after
+	      targetPrev = vms[i - 1]
+	      if (!targetPrev) {
+	        // This is the first item. If it's reused then
 	        // everything else will eventually be in the right
 	        // place, so no need to touch it. Otherwise, insert
 	        // it.
 	        if (!vm._reused) {
-	          vm.$before(anchor)
+	          this.insert(vm, start, insertionIndex++)
 	        }
 	      } else {
-	        var nextEl = targetNext.$el
+	        var prevEl = targetPrev._blockEnd || targetPrev.$el
 	        if (vm._reused) {
-	          // this is the vm we are actually in front of
-	          currentNext = findNextVm(vm, anchor)
+	          // this is the vm we are actually after
+	          currentPrev = findPrevVm(vm, start)
 	          // we only need to move if we are not in the right
 	          // place already.
-	          if (currentNext !== targetNext) {
-	            vm.$before(nextEl, null, false)
+	          if (currentPrev !== targetPrev) {
+	            vm.$after(prevEl, null, false)
 	          }
 	        } else {
 	          // new instance, insert to existing next
-	          vm.$before(nextEl)
+	          this.insert(vm, prevEl, insertionIndex++)
 	        }
 	      }
-	      vm._new = false
 	      vm._reused = false
+	    }
+	    if (activeElement) {
+	      activeElement.focus()
 	    }
 	    return vms
 	  },
@@ -7050,9 +7086,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	      inherit: this.inherit,
 	      template: this.inlineTempalte
 	    }, Ctor)
-	    // flag this instance as a repeat instance
-	    // so that we can skip it in vm._digest
-	    vm._repeat = true
 	    // cache instance
 	    if (needCache) {
 	      this.cacheVm(raw, vm, index, this.converted ? meta.$key : null)
@@ -7065,6 +7098,16 @@ return /******/ (function(modules) { // webpackBootstrap
 	      (type === 'string' || type === 'number')
 	    ) {
 	      vm.$watch(alias || '$value', function (val) {
+	        if (dir.filters) {
+	          _.warn(
+	            'You seem to be mutating the $value reference of ' +
+	            'a v-repeat instance (likely through v-model) ' +
+	            'and filtering the v-repeat at the same time. ' +
+	            'This will not work properly with an Array of ' +
+	            'primitive values. Please use an Array of ' +
+	            'Objects instead.'
+	          )
+	        }
 	        dir._withLock(function () {
 	          if (dir.converted) {
 	            dir.rawValue[vm.$key] = val
@@ -7114,19 +7157,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	  cacheVm: function (data, vm, index, key) {
 	    var idKey = this.idKey
 	    var cache = this.cache
+	    var primitive = !isObject(data)
 	    var id
-	    if (key || idKey) {
+	    if (key || idKey || primitive) {
 	      id = idKey
 	        ? idKey === '$index'
 	          ? index
 	          : data[idKey]
-	        : key
+	        : (key || index)
 	      if (!cache[id]) {
 	        cache[id] = vm
-	      } else {
+	      } else if (!primitive && idKey !== '$index') {
 	        _.warn('Duplicate track-by key in v-repeat: ' + id)
 	      }
-	    } else if (isObject(data)) {
+	    } else {
 	      id = this.id
 	      if (data.hasOwnProperty(id)) {
 	        if (data[id] === null) {
@@ -7139,12 +7183,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	        }
 	      } else {
 	        _.define(data, id, vm)
-	      }
-	    } else {
-	      if (!cache[data]) {
-	        cache[data] = [vm]
-	      } else {
-	        cache[data].push(vm)
 	      }
 	    }
 	    vm._raw = data
@@ -7161,28 +7199,16 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  getVm: function (data, index, key) {
 	    var idKey = this.idKey
-	    if (key || idKey) {
+	    var primitive = !isObject(data)
+	    if (key || idKey || primitive) {
 	      var id = idKey
 	        ? idKey === '$index'
 	          ? index
 	          : data[idKey]
-	        : key
+	        : (key || index)
 	      return this.cache[id]
-	    } else if (isObject(data)) {
-	      return data[this.id]
 	    } else {
-	      var cached = this.cache[data]
-	      if (cached) {
-	        var i = 0
-	        var vm = cached[i]
-	        // since duplicated vm instances might be a reused
-	        // one OR a newly created one, we need to return the
-	        // first instance that is neither of these.
-	        while (vm && (vm._reused || vm._new)) {
-	          vm = cached[++i]
-	        }
-	        return vm
-	      }
+	      return data[this.id]
 	    }
 	  },
 
@@ -7195,19 +7221,19 @@ return /******/ (function(modules) { // webpackBootstrap
 	  uncacheVm: function (vm) {
 	    var data = vm._raw
 	    var idKey = this.idKey
-	    var convertedKey = vm.$key
-	    if (idKey || convertedKey) {
+	    var index = vm.$index
+	    var key = vm.$key
+	    var primitive = !isObject(data)
+	    if (idKey || key || primitive) {
 	      var id = idKey
 	        ? idKey === '$index'
-	          ? vm.$index
+	          ? index
 	          : data[idKey]
-	        : convertedKey
+	        : (key || index)
 	      this.cache[id] = null
-	    } else if (isObject(data)) {
+	    } else {
 	      data[this.id] = null
 	      vm._raw = null
-	    } else {
-	      this.cache[data].pop()
 	    }
 	  },
 
@@ -7251,12 +7277,35 @@ return /******/ (function(modules) { // webpackBootstrap
 	      this.converted = true
 	      return res
 	    }
+	  },
+
+	  insert: function (vm, prevEl, index) {
+	    if (this.stagger) {
+	      setTimeout(function () {
+	        vm.$after(prevEl)
+	      }, index * this.stagger)
+	    } else {
+	      vm.$after(prevEl)
+	    }
+	  },
+
+	  remove: function (vm, index) {
+	    if (this.stagger) {
+	      setTimeout(remove, index * this.stagger)
+	    } else {
+	      remove()
+	    }
+	    function remove () {
+	      vm.$remove(function () {
+	        vm._cleanup()
+	      })
+	    }
 	  }
 
 	}
 
 	/**
-	 * Helper to find the next element that is an instance
+	 * Helper to find the previous element that is an instance
 	 * root node. This is necessary because a destroyed vm's
 	 * element could still be lingering in the DOM before its
 	 * leaving transition finishes, but its __vue__ reference
@@ -7267,10 +7316,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	 * @return {Vue}
 	 */
 
-	function findNextVm (vm, anchor) {
-	  var el = (vm._blockEnd || vm.$el).nextSibling
+	function findPrevVm (vm, anchor) {
+	  var el = (vm._blockEnd || vm.$el).previousSibling
 	  while (!el.__vue__ && el !== anchor) {
-	    el = el.nextSibling
+	    el = el.previousSibling
 	  }
 	  return el.__vue__
 	}
@@ -7289,6 +7338,22 @@ return /******/ (function(modules) { // webpackBootstrap
 	    ret[i] = i
 	  }
 	  return ret
+	}
+
+	/**
+	 * Convert a vms array to an object ref for v-ref on an
+	 * Object value.
+	 *
+	 * @param {Array} vms
+	 * @return {Object}
+	 */
+
+	function toRefObject (vms) {
+	  var ref = {}
+	  for (var i = 0, l = vms.length; i < l; i++) {
+	    ref[vms[i].$key] = vms[i]
+	  }
+	  return ref
 	}
 
 /***/ },
@@ -7762,7 +7827,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 
 	  // props used in v-repeat diffing
-	  this._new = true
 	  this._reused = false
 
 	  // merge options.
@@ -8235,6 +8299,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      // cached
 	      cb(factory.resolved)
 	    } else if (factory.requested) {
+	      // pool callbacks
 	      factory.pendingCallbacks.push(cb)
 	    } else {
 	      factory.requested = true
@@ -8249,6 +8314,11 @@ return /******/ (function(modules) { // webpackBootstrap
 	        for (var i = 0, l = cbs.length; i < l; i++) {
 	          cbs[i](res)
 	        }
+	      }, function reject (reason) {
+	        _.warn(
+	          'Failed to resolve async component: ' + id + '. ' +
+	          (reason ? '\nReason: ' + reason : '')
+	        )
 	      })
 	    }
 	  } else {

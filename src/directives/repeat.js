@@ -23,9 +23,11 @@ module.exports = {
   bind: function () {
     // uid as a cache identifier
     this.id = '__v_repeat_' + (++uid)
-    // setup anchor node
-    this.anchor = _.createAnchor('v-repeat')
-    _.replace(this.el, this.anchor)
+    // setup anchor nodes
+    this.start = _.createAnchor('v-repeat-start')
+    this.end = _.createAnchor('v-repeat')
+    _.replace(this.el, this.end)
+    _.before(this.start, this.end)
     // check if this is a block repeat
     this.template = this.el.tagName === 'TEMPLATE'
       ? templateParser.parse(this.el, true)
@@ -39,6 +41,8 @@ module.exports = {
     this.idKey =
       this._checkParam('track-by') ||
       this._checkParam('trackby') // 0.11.0 compat
+    // check for transition stagger
+    this.stagger = +this._checkParam('stagger')
     this.cache = Object.create(null)
   },
 
@@ -240,7 +244,8 @@ module.exports = {
     var activeElement = document.activeElement
     var idKey = this.idKey
     var converted = this.converted
-    var anchor = this.anchor
+    var start = this.start
+    var end = this.end
     var alias = this.arg
     var init = !oldVms
     var vms = new Array(data.length)
@@ -276,7 +281,7 @@ module.exports = {
       vms[i] = vm
       // insert if this is first run
       if (init) {
-        vm.$before(anchor)
+        vm.$before(end)
       }
     }
     // if this is the first run, we're done.
@@ -286,44 +291,44 @@ module.exports = {
     // Second pass, go through the old vm instances and
     // destroy those who are not reused (and remove them
     // from cache)
+    var removalIndex = 0
     for (i = 0, l = oldVms.length; i < l; i++) {
       vm = oldVms[i]
       if (!vm._reused) {
         this.uncacheVm(vm)
-        vm.$destroy(true)
+        vm.$destroy(false, true)
+        this.remove(vm, removalIndex++)
       }
     }
     // final pass, move/insert new instances into the
-    // right place. We're going in reverse here because
-    // insertBefore relies on the next sibling to be
-    // resolved.
-    var targetNext, currentNext
-    i = vms.length
-    while (i--) {
+    // right place.
+    var targetPrev, currentPrev
+    var insertionIndex = 0
+    for (i = 0, l = vms.length; i < l; i++) {
       vm = vms[i]
-      // this is the vm that we should be in front of
-      targetNext = vms[i + 1]
-      if (!targetNext) {
-        // This is the last item. If it's reused then
+      // this is the vm that we should be after
+      targetPrev = vms[i - 1]
+      if (!targetPrev) {
+        // This is the first item. If it's reused then
         // everything else will eventually be in the right
         // place, so no need to touch it. Otherwise, insert
         // it.
         if (!vm._reused) {
-          vm.$before(anchor)
+          this.insert(vm, start, insertionIndex++)
         }
       } else {
-        var nextEl = targetNext.$el
+        var prevEl = targetPrev._blockEnd || targetPrev.$el
         if (vm._reused) {
-          // this is the vm we are actually in front of
-          currentNext = findNextVm(vm, anchor)
+          // this is the vm we are actually after
+          currentPrev = findPrevVm(vm, start)
           // we only need to move if we are not in the right
           // place already.
-          if (currentNext !== targetNext) {
-            vm.$before(nextEl, null, false)
+          if (currentPrev !== targetPrev) {
+            vm.$after(prevEl, null, false)
           }
         } else {
           // new instance, insert to existing next
-          vm.$before(nextEl)
+          this.insert(vm, prevEl, insertionIndex++)
         }
       }
       vm._reused = false
@@ -563,12 +568,35 @@ module.exports = {
       this.converted = true
       return res
     }
+  },
+
+  insert: function (vm, prevEl, index) {
+    if (this.stagger) {
+      setTimeout(function () {
+        vm.$after(prevEl)
+      }, index * this.stagger)
+    } else {
+      vm.$after(prevEl)
+    }
+  },
+
+  remove: function (vm, index) {
+    if (this.stagger) {
+      setTimeout(remove, index * this.stagger)
+    } else {
+      remove()
+    }
+    function remove () {
+      vm.$remove(function () {
+        vm._cleanup()
+      })
+    }
   }
 
 }
 
 /**
- * Helper to find the next element that is an instance
+ * Helper to find the previous element that is an instance
  * root node. This is necessary because a destroyed vm's
  * element could still be lingering in the DOM before its
  * leaving transition finishes, but its __vue__ reference
@@ -579,10 +607,10 @@ module.exports = {
  * @return {Vue}
  */
 
-function findNextVm (vm, anchor) {
-  var el = (vm._blockEnd || vm.$el).nextSibling
+function findPrevVm (vm, anchor) {
+  var el = (vm._blockEnd || vm.$el).previousSibling
   while (!el.__vue__ && el !== anchor) {
-    el = el.nextSibling
+    el = el.previousSibling
   }
   return el.__vue__
 }
